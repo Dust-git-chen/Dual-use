@@ -1,0 +1,14 @@
+# ============ Dual-use ============
+# 忽略 Python 运行产物
+__pycache__/
+*.pyc
+*.pyo
+
+# 忽略 PyInstaller 构建缓存（dist/ 仅保留发布版 exe 时可手动处理）
+build/
+
+# 忽略本地备份与临时文件
+*.BAK_*
+_backup_*/
+_diag_tools/
+*.log

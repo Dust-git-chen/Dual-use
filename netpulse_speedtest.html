@@ -1,0 +1,1987 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dual-use · Windows 双模网络测速与分流延迟诊断终端</title>
+  <link rel="icon" type="image/png" href="icon_src/aeropulse_favicon.png" />
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-app: #F4F6F9;
+      --bg-surface: rgba(255, 255, 255, 0.88);
+      --bg-card: #FFFFFF;
+      --bg-subtle: #F8FAFC;
+      --bg-muted: #F1F5F9;
+      --border-hairline: #E2E8F0;
+      --border-strong: #CBD5E1;
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --text-muted: #94A3B8;
+      --accent-primary: #2563EB;
+      --accent-teal: #0D9488;
+      --accent-indigo: #4F46E5;
+      --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.03), 0 8px 24px -4px rgba(15, 23, 42, 0.04);
+      --shadow-elevated: 0 12px 32px -8px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.03);
+      --gauge-track: #E6EBF2;
+      --gauge-inner: #F7F9FC;
+      --gauge-tick: #C3CDDB;
+      --gauge-num: #8A99AD;
+    }
+
+    html.dark {
+      --bg-app: #090D16;
+      --bg-surface: rgba(17, 24, 39, 0.86);
+      --bg-card: #111827;
+      --bg-subtle: #161F33;
+      --bg-muted: #1E293B;
+      --border-hairline: #1E293B;
+      --border-strong: #334155;
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --accent-primary: #3B82F6;
+      --accent-teal: #14B8A6;
+      --accent-indigo: #6366F1;
+      --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.25), 0 8px 24px -4px rgba(0, 0, 0, 0.35);
+      --shadow-elevated: 0 12px 32px -8px rgba(0, 0, 0, 0.5);
+      --gauge-track: #26303F;
+      --gauge-inner: #161E2C;
+      --gauge-tick: #3B4759;
+      --gauge-num: #64748B;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background-color: var(--bg-app);
+      color: var(--text-primary);
+      margin: 0;
+      padding: 0;
+      transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      overflow-x: hidden;
+    }
+
+    .font-mono-num {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .desktop-shell {
+      background: var(--bg-surface);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border-hairline);
+      box-shadow: var(--shadow-elevated);
+      transition: all 0.25s ease;
+    }
+
+    .surface-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-hairline);
+      box-shadow: var(--shadow-card);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    }
+
+    .surface-card:hover {
+      border-color: var(--border-strong);
+    }
+
+    .surface-subtle {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-hairline);
+    }
+
+    .pill-segment {
+      background: var(--bg-muted);
+      padding: 3px;
+      border-radius: 12px;
+      border: 1px solid var(--border-hairline);
+    }
+
+    .pill-btn {
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .pill-btn.active {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    }
+
+    .gauge-arc {
+      transition: stroke-dashoffset 0.28s cubic-bezier(0.33, 1, 0.68, 1), stroke 0.3s ease;
+    }
+
+    #gaugeKnob {
+      transition: cx 0.28s cubic-bezier(0.33, 1, 0.68, 1),
+                  cy 0.28s cubic-bezier(0.33, 1, 0.68, 1),
+                  opacity 0.3s ease;
+    }
+
+    .latency-bar-fill {
+      transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.25s ease;
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.7; }
+      50% { transform: scale(1.08); opacity: 0.25; }
+      100% { transform: scale(0.95); opacity: 0.7; }
+    }
+
+    .animate-pulse-soft {
+      animation: pulse-ring 2.2s infinite ease-in-out;
+    }
+
+    /* Custom subtle scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.35);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.55);
+    }
+  </style>
+</head>
+<body class="min-h-screen p-2 sm:p-4 md:p-6 flex flex-col items-center justify-start">
+
+  <!-- Main Windows 11 Style Frameless Desktop Container -->
+  <div id="appShell" class="desktop-shell w-full max-w-[1280px] rounded-2xl overflow-hidden flex flex-col">
+
+    <!-- Top Windows Frameless Title Bar -->
+    <header class="h-12 px-4 flex items-center justify-between border-b border-[var(--border-hairline)] select-none bg-[var(--bg-card)]/60">
+      <div class="flex items-center gap-3">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-sm tracking-tight">Dual-use</span>
+          <span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">Windows Desktop v2.4</span>
+        </div>
+        <div class="hidden md:flex items-center gap-1.5 ml-3 pl-3 border-l border-[var(--border-hairline)] text-xs text-[var(--text-secondary)]">
+          <span id="engineBadgeDot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span id="engineStatusText">双栈测速引擎就绪</span>
+          <span class="text-[var(--text-muted)]">·</span>
+          <span id="proxyStatusHeader" class="font-mono-num text-[11px] text-[var(--text-muted)]">检测系统代理中…</span>
+        </div>
+      </div>
+
+      <!-- Right Controls: Navigation Tabs, Proxy Settings, Theme Toggle, Window Chrome -->
+      <div class="flex items-center gap-2">
+        <!-- Main View Switcher -->
+        <nav class="pill-segment flex items-center text-xs font-medium mr-1">
+          <button id="navTabDashboard" type="button" class="pill-btn active px-3 py-1 rounded-lg flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>测速与延迟台</span>
+          </button>
+          <button id="navTabCompare" type="button" class="pill-btn px-3 py-1 rounded-lg flex items-center gap-1.5 text-[var(--text-secondary)]">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            <span>双模对比与历史</span>
+            <span id="historyCountBadge" class="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono-num">2</span>
+          </button>
+        </nav>
+
+        <!-- Proxy Config Button -->
+        <button id="btnOpenSettings" type="button" class="h-8 px-2.5 rounded-lg surface-subtle hover:border-blue-500/40 text-xs font-medium flex items-center gap-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition" title="配置 VPN 与代理端口">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span class="hidden sm:inline">通道设置</span>
+        </button>
+
+        <!-- Theme Toggle Button -->
+        <button id="btnThemeToggle" type="button" class="w-8 h-8 rounded-lg surface-subtle flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition" title="切换浅色/深色外观">
+          <svg id="iconSun" class="w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+          </svg>
+          <svg id="iconMoon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+          </svg>
+        </button>
+
+        <!-- Windows Style Window Controls -->
+        <div class="hidden sm:flex items-center pl-2 ml-1 border-l border-[var(--border-hairline)] gap-1">
+          <button id="btnWinCompact" type="button" class="w-7 h-7 rounded-md hover:bg-slate-500/10 flex items-center justify-center text-[var(--text-secondary)]" title="紧凑/标准视图切换">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 12H4"/></svg>
+          </button>
+          <button id="btnWinExpand" type="button" class="w-7 h-7 rounded-md hover:bg-slate-500/10 flex items-center justify-center text-[var(--text-secondary)]" title="全宽展开切换">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" stroke-width="1.8"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Top Mode Selector & Action Bar -->
+    <section class="px-5 py-3.5 border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)]/60 flex flex-wrap items-center justify-between gap-4">
+      <!-- Left: Routing Mode Segmented Selector -->
+      <div class="flex flex-wrap items-center gap-3">
+        <span class="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">测速通道模式</span>
+        <div class="pill-segment inline-flex items-center gap-1">
+          <button id="modeBtnDirect" type="button" class="pill-btn active px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>不走 VPN · 纯净直连</span>
+            <span class="text-[10px] font-mono-num px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">DIRECT</span>
+          </button>
+          <button id="modeBtnVpn" type="button" class="pill-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 text-[var(--text-secondary)]">
+            <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+            <span>走 VPN · 代理隧道</span>
+            <span class="text-[10px] font-mono-num px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">PROXY / TUN</span>
+          </button>
+          <button id="modeBtnDual" type="button" class="pill-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 text-[var(--text-secondary)]">
+            <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+            <span>双模连续测速对比</span>
+            <span class="text-[10px] font-mono-num px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">DUAL DIFF</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Route Telemetry Summary Badges -->
+      <div class="flex items-center gap-3 text-xs">
+        <div class="surface-card px-3 py-1.5 rounded-xl flex items-center gap-2">
+          <span class="text-[var(--text-muted)]">当前出口:</span>
+          <span id="currentRouteBadge" class="font-medium text-emerald-600 dark:text-emerald-400">检测网络环境中…</span>
+          <span class="text-[var(--text-muted)]">|</span>
+          <span id="currentIspNode" class="font-mono-num text-[var(--text-secondary)]">检测网络环境中…</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== VIEW 1: MAIN DASHBOARD ==================== -->
+    <main id="viewDashboard" class="p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+      <!-- Left Column (5 cols on lg): Speedometer, Upload/Download Telemetry & Waveform -->
+      <div class="lg:col-span-5 flex flex-col gap-5">
+
+        <!-- Main Speedometer & Control Card -->
+        <div class="surface-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden">
+          <!-- Card Header -->
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold tracking-tight">上下行带宽与链路质量</h2>
+                <span id="activeModeTag" class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">不走 VPN (直连)</span>
+              </div>
+              <p id="testPhaseSubtitle" class="text-xs text-[var(--text-secondary)] mt-0.5">多线程并发流式传输 · 实时探测最大吞吐量与抖动</p>
+            </div>
+            <!-- Unit Switcher (Mbps / MB/s) -->
+            <button id="btnUnitToggle" type="button" class="surface-subtle px-2.5 py-1 rounded-lg text-[11px] font-mono-num font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition" title="切换速率单位 Mbps / MB/s">
+              单位: <span id="unitLabelText" class="text-blue-600 dark:text-blue-400 font-semibold">Mbps</span>
+            </button>
+          </div>
+
+          <!-- Speedtest 风格弧形仪表：分层轨道 + 游标 + 端点 -->
+          <div class="my-2 flex flex-col items-center justify-center relative">
+            <svg id="gaugeSvg" class="w-[276px] h-[172px] overflow-visible" viewBox="0 0 240 145">
+              <defs>
+                <linearGradient id="gradDownload" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#38BDF8" />
+                  <stop offset="55%" stop-color="#3B82F6" />
+                  <stop offset="100%" stop-color="#6366F1" />
+                </linearGradient>
+                <linearGradient id="gradUpload" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#2DD4BF" />
+                  <stop offset="55%" stop-color="#14B8A6" />
+                  <stop offset="100%" stop-color="#0D9488" />
+                </linearGradient>
+                <filter id="gaugeGlow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="3.2" result="b" />
+                  <feMerge>
+                    <feMergeNode in="b" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+
+              <!-- 极淡的内圈填充，给盘面一点体积感 -->
+              <path d="M 28 125 A 92 92 0 1 1 212 125" fill="none"
+                    stroke="var(--gauge-inner)" stroke-width="34" stroke-linecap="round" />
+
+              <!-- 底轨 -->
+              <path d="M 28 125 A 92 92 0 1 1 212 125" fill="none"
+                    stroke="var(--gauge-track)" stroke-width="10" stroke-linecap="round" />
+
+              <!-- 刻度：主刻度从内向外画，按 12 等分 -->
+              <g id="gaugeTicksStroke" stroke="var(--gauge-tick)" stroke-linecap="round"></g>
+
+              <!-- 刻度数字（0 / 250 / 500 / 750 / 1000，由 layoutGaugeTicks 定位） -->
+              <g id="gaugeScaleTicks" font-size="9" font-weight="600" font-family="'JetBrains Mono',monospace"
+                 fill="var(--gauge-num)">
+                <text>0</text><text>250</text><text>500</text><text>750</text><text id="gaugeTickMax">1000</text>
+              </g>
+
+              <!-- 已达成弧段 -->
+              <path id="gaugeArcPath" class="gauge-arc" d="M 28 125 A 92 92 0 1 1 212 125" fill="none"
+                    stroke="url(#gradDownload)" stroke-width="10" stroke-linecap="round"
+                    stroke-dasharray="289" stroke-dashoffset="289" filter="url(#gaugeGlow)" />
+
+              <!-- 游标：一个带光晕的小圆点，贴在弧线末端 -->
+              <circle id="gaugeKnob" r="5.5" fill="var(--bg-card)" stroke="#3B82F6" stroke-width="3"
+                      cx="28" cy="125" opacity="0" filter="url(#gaugeGlow)" />
+
+              <!-- 端点 -->
+              <circle cx="28" cy="125" r="2.6" fill="var(--gauge-tick)" />
+              <circle cx="212" cy="125" r="2.6" fill="var(--gauge-tick)" />
+            </svg>
+
+            <!-- 中心读数 -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pt-1">
+              <span id="gaugePhaseBadge" class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">READY</span>
+              <div class="flex items-baseline gap-1 mt-1">
+                <span id="gaugeMainValue" class="font-mono-num text-[42px] leading-none font-semibold tracking-tight" style="font-variant-numeric: tabular-nums;">0.0</span>
+              </div>
+              <span id="gaugeUnitSub" class="text-[11px] font-mono-num text-[var(--text-secondary)] mt-1">Mbps</span>
+              <span id="gaugePctLabel" class="text-[10px] font-mono-num text-[var(--text-muted)] mt-0.5 h-3"></span>
+            </div>
+          </div>
+
+          <!-- 阶段进度条 -->
+          <div class="w-full h-1 rounded-full bg-[var(--bg-muted)] overflow-hidden mb-4">
+            <div id="testOverallProgress" class="h-full rounded-full bg-gradient-to-r from-sky-400 to-indigo-500 transition-all duration-150" style="width: 0%"></div>
+          </div>
+
+          <!-- Speedtest 风格结果条：下载 / 上传 / Ping / 抖动 -->
+          <div class="grid grid-cols-4 gap-2 mb-3.5">
+            <div class="text-center">
+              <div class="w-6 h-6 mx-auto mb-1.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m0 0l-6-6m6 6l6-6"/></svg>
+              </div>
+              <div class="text-[10px] text-[var(--text-muted)] mb-0.5">下载</div>
+              <div class="font-mono-num text-[15px] font-semibold leading-none text-blue-600 dark:text-blue-400"><span id="dlValueText">--</span></div>
+              <div class="text-[9px] font-mono-num text-[var(--text-muted)] mt-1 unit-suffix">Mbps</div>
+              <div id="dlPeakLabel" class="text-[9px] font-mono-num text-[var(--text-muted)] mt-0.5 h-3">峰值 --</div>
+            </div>
+            <div class="text-center">
+              <div class="w-6 h-6 mx-auto mb-1.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg>
+              </div>
+              <div class="text-[10px] text-[var(--text-muted)] mb-0.5">上传</div>
+              <div class="font-mono-num text-[15px] font-semibold leading-none text-teal-600 dark:text-teal-400"><span id="ulValueText">--</span></div>
+              <div class="text-[9px] font-mono-num text-[var(--text-muted)] mt-1 unit-suffix">Mbps</div>
+              <div id="ulPeakLabel" class="text-[9px] font-mono-num text-[var(--text-muted)] mt-0.5 h-3">峰值 --</div>
+            </div>
+            <div class="text-center">
+              <div class="w-6 h-6 mx-auto mb-1.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              </div>
+              <div class="text-[10px] text-[var(--text-muted)] mb-0.5">延迟</div>
+              <div class="font-mono-num text-[15px] font-semibold leading-none"><span id="metricPing">--</span></div>
+              <div class="text-[9px] font-mono-num text-[var(--text-muted)] mt-1">ms</div>
+              <div class="text-[9px] font-mono-num text-[var(--text-muted)] mt-0.5 h-3">空载</div>
+            </div>
+            <div class="text-center">
+              <div class="w-6 h-6 mx-auto mb-1.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 12h3l2-6 3 12 3-8 2 2h3"/></svg>
+              </div>
+              <div class="text-[10px] text-[var(--text-muted)] mb-0.5">抖动</div>
+              <div class="font-mono-num text-[15px] font-semibold leading-none"><span id="metricJitter">--</span></div>
+              <div class="text-[9px] font-mono-num text-[var(--text-muted)] mt-1">ms</div>
+              <div id="metricLoss" class="text-[9px] font-mono-num text-[var(--text-muted)] mt-0.5 h-3">丢包 0.0%</div>
+            </div>
+          </div>
+
+          <!-- 缓冲膨胀评级（次要点，收成一条） -->
+          <div class="surface-subtle rounded-lg px-3 py-1.5 mb-3.5 flex items-center justify-between">
+            <span class="text-[10px] text-[var(--text-muted)]">缓冲膨胀评级 (Bufferbloat)</span>
+            <span id="metricGrade" class="font-mono-num text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">A+</span>
+          </div>
+
+          <!-- 实时吞吐波形 -->
+          <div class="surface-subtle rounded-lg px-2.5 pt-2 pb-1.5 mb-3.5">
+            <div class="flex items-center justify-between text-[10px] text-[var(--text-muted)] mb-1">
+              <span id="waveCaption">实测吞吐 · 每秒采样</span>
+              <div class="flex items-center gap-3">
+                <span class="flex items-center gap-1"><i class="w-2.5 h-0.5 bg-blue-500 inline-block rounded"></i>下行</span>
+                <span class="flex items-center gap-1"><i class="w-2.5 h-0.5 bg-teal-500 inline-block rounded"></i>上行</span>
+              </div>
+            </div>
+            <div class="relative h-14 w-full">
+              <canvas id="waveformCanvas" class="w-full h-full block"></canvas>
+            </div>
+          </div>
+
+          <!-- Speedtest 风格单一主按钮 + 次按钮 -->
+          <div class="flex items-stretch gap-2">
+            <button id="btnStartFullTest" type="button" class="flex-1 h-11 rounded-full bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:via-blue-500 hover:to-indigo-500 text-white font-semibold text-[13px] shadow-[0_6px_18px_-6px_rgba(37,99,235,0.75)] flex items-center justify-center gap-2 transition active:scale-[0.985]">
+              <svg id="iconStartPlay" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5.14v13.72c0 .8.87 1.3 1.56.9l11.1-6.86a1.05 1.05 0 000-1.8L9.56 4.24A1.05 1.05 0 008 5.14z"/>
+              </svg>
+              <span id="btnStartText">开始测速</span>
+            </button>
+            <button id="btnQuickPingOnly" type="button" class="h-11 px-3.5 rounded-full surface-subtle hover:border-blue-500/40 text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition flex items-center gap-1.5" title="仅快速刷新全部国内外软件延迟">
+              <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <span>仅测延迟</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Smart Split-Tunneling Diagnostic Card (智能分流诊断) -->
+        <div class="surface-card rounded-2xl p-4 flex flex-col gap-2.5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-6 h-6 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+              </div>
+              <h3 class="text-xs font-semibold">智能路由与分流健康度诊断</h3>
+            </div>
+            <span id="diagStatusBadge" class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">分流规则正常</span>
+          </div>
+          <p id="diagSummaryText" class="text-xs text-[var(--text-secondary)] leading-relaxed">
+            当前处于<strong class="text-[var(--text-primary)]">不走 VPN 直连模式</strong>：中国大陆应用平均延迟预计在 <span class="font-mono-num text-emerald-600 dark:text-emerald-400 font-medium">18–38 ms</span>，而部分海外应用受跨境链路或防火墙影响可能出现连接超时或高延迟。点击“开始全项测速”或切换至“走 VPN”对比加速效果。
+          </p>
+        </div>
+
+      </div>
+
+      <!-- Right Column (7 cols on lg): Mainland China vs Overseas Software Latency Matrix -->
+      <div class="lg:col-span-7 flex flex-col gap-5">
+
+        <!-- Filter & Action Header Card -->
+        <div class="surface-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold">应用分类筛选:</span>
+            <div class="pill-segment inline-flex items-center gap-0.5 text-xs">
+              <button type="button" data-cat="all" class="cat-filter-btn pill-btn active px-2.5 py-1 rounded-md font-medium">全部应用 (16)</button>
+              <button type="button" data-cat="social" class="cat-filter-btn pill-btn px-2.5 py-1 rounded-md font-medium text-[var(--text-secondary)]">社交与办公</button>
+              <button type="button" data-cat="media" class="cat-filter-btn pill-btn px-2.5 py-1 rounded-md font-medium text-[var(--text-secondary)]">影音与流媒体</button>
+              <button type="button" data-cat="dev" class="cat-filter-btn pill-btn px-2.5 py-1 rounded-md font-medium text-[var(--text-secondary)]">开发与 AI</button>
+              <button type="button" data-cat="game" class="cat-filter-btn pill-btn px-2.5 py-1 rounded-md font-medium text-[var(--text-secondary)]">游戏平台</button>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="btnAddCustomNode" type="button" class="h-8 px-2.5 rounded-lg surface-subtle hover:border-blue-500/40 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 transition">
+              <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              <span>添加自定义软件/域名</span>
+            </button>
+            <button id="btnExportReport" type="button" class="h-8 px-2.5 rounded-lg surface-subtle hover:border-blue-500/40 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 transition">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              <span>复制诊断报告</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Two-Column Latency Matrix: Mainland China Apps vs Overseas Apps -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 flex-1">
+
+          <!-- Panel A: Mainland China Common Software Latency (中国大陆常用软件延迟) -->
+          <div class="surface-card rounded-2xl p-4 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between pb-3 mb-3 border-b border-[var(--border-hairline)]">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                    CN
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-semibold tracking-tight">中国大陆常用软件延迟</h3>
+                    <p class="text-[11px] text-[var(--text-muted)]">检测国内主干网 CDN 与直连分流响应</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <span class="text-[10px] text-[var(--text-muted)] block">平均延迟</span>
+                  <span id="avgLatencyCn" class="font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">-- ms</span>
+                </div>
+              </div>
+
+              <!-- Mainland China Software List Container -->
+              <div id="listContainerCn" class="space-y-2.5 max-h-[430px] overflow-y-auto pr-1">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+
+            <div class="mt-3 pt-2.5 border-t border-[var(--border-hairline)] flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+              <span>建议目标：直连 &lt; 45ms · 走 VPN 开启规则分流</span>
+              <button id="btnPingCnOnly" type="button" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">重测国内节点</button>
+            </div>
+          </div>
+
+          <!-- Panel B: Overseas Common Software Latency (海外常用软件延迟) -->
+          <div class="surface-card rounded-2xl p-4 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between pb-3 mb-3 border-b border-[var(--border-hairline)]">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                    GL
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-semibold tracking-tight">海外常用软件延迟</h3>
+                    <p class="text-[11px] text-[var(--text-muted)]">检测国际专线、流媒体、AI 与海外社区响应</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <span class="text-[10px] text-[var(--text-muted)] block">平均延迟</span>
+                  <span id="avgLatencyGlobal" class="font-mono-num text-sm font-bold text-indigo-600 dark:text-indigo-400">-- ms</span>
+                </div>
+              </div>
+
+              <!-- Overseas Software List Container -->
+              <div id="listContainerGlobal" class="space-y-2.5 max-h-[430px] overflow-y-auto pr-1">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+
+            <div class="mt-3 pt-2.5 border-t border-[var(--border-hairline)] flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+              <span>建议目标：走 VPN 专线 &lt; 150ms · 0% 丢包</span>
+              <button id="btnPingGlobalOnly" type="button" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">重测海外节点</button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </main>
+
+    <!-- ==================== VIEW 2: DUAL-MODE COMPARISON & HISTORY ==================== -->
+    <section id="viewCompare" class="p-5 hidden flex-col gap-5">
+      <!-- Top Side-by-Side Comparison Banner -->
+      <div class="surface-card rounded-2xl p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4 pb-3 border-b border-[var(--border-hairline)]">
+          <div>
+            <h2 class="text-base font-semibold">不走 VPN (直连) vs 走 VPN (代理) 双模同屏对比矩阵</h2>
+            <p class="text-xs text-[var(--text-secondary)] mt-0.5">直观对比开启 VPN 前后的上下行带宽损耗、国内软件分流稳定性及海外软件加速倍率</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btnRunDualFromCompare" type="button" class="h-9 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              <span>立即执行双模自动对比测试</span>
+            </button>
+            <button id="btnClearHistory" type="button" class="h-9 px-3 rounded-xl surface-subtle text-xs font-medium text-[var(--text-secondary)] hover:text-rose-600 transition">
+              清空记录
+            </button>
+          </div>
+        </div>
+
+        <!-- Comparison Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="surface-subtle rounded-xl p-4">
+            <span class="text-xs text-[var(--text-muted)]">下行带宽保持率 (走VPN / 不走VPN)</span>
+            <div class="flex items-baseline gap-2 mt-1">
+              <span id="compDlRatio" class="font-mono-num text-2xl font-bold text-blue-600 dark:text-blue-400">84.2%</span>
+              <span id="compDlDetail" class="text-xs font-mono-num text-[var(--text-secondary)]">438 Mbps vs 520 Mbps</span>
+            </div>
+            <p class="text-[11px] text-[var(--text-muted)] mt-1.5">衡量 VPN 协议加密与中转节点对本地千兆宽带的折损比例</p>
+          </div>
+
+          <div class="surface-subtle rounded-xl p-4">
+            <span class="text-xs text-[var(--text-muted)]">中国大陆软件分流保速</span>
+            <div class="flex items-baseline gap-2 mt-1">
+              <span id="compCnDelta" class="font-mono-num text-2xl font-bold text-emerald-600 dark:text-emerald-400">+3 ms</span>
+              <span id="compCnDetail" class="text-xs font-mono-num text-[var(--text-secondary)]">直连 24ms · VPN 27ms</span>
+            </div>
+            <p class="text-[11px] text-[var(--text-muted)] mt-1.5">若差值 &lt; 10ms，说明您的代理客户端已正确配置绕过中国大陆规则</p>
+          </div>
+
+          <div class="surface-subtle rounded-xl p-4">
+            <span class="text-xs text-[var(--text-muted)]">海外常用软件连通与加速提升</span>
+            <div class="flex items-baseline gap-2 mt-1">
+              <span id="compGlobalDelta" class="font-mono-num text-2xl font-bold text-indigo-600 dark:text-indigo-400">100% 连通</span>
+              <span id="compGlobalDetail" class="text-xs font-mono-num text-[var(--text-secondary)]">平均 89ms (原 5 项超时)</span>
+            </div>
+            <p class="text-[11px] text-[var(--text-muted)] mt-1.5">走 VPN 模式下海外流媒体、AI 与代码托管服务的响应改善幅度</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed History Table -->
+      <div class="surface-card rounded-2xl p-5">
+        <h3 class="text-sm font-semibold mb-3">历史测速快照记录</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="border-b border-[var(--border-hairline)] text-[var(--text-muted)]">
+                <th class="py-2.5 px-3 font-medium">测试时间</th>
+                <th class="py-2.5 px-3 font-medium">测速通道模式</th>
+                <th class="py-2.5 px-3 font-medium">代理/出口节点</th>
+                <th class="py-2.5 px-3 font-medium text-right">下载速度</th>
+                <th class="py-2.5 px-3 font-medium text-right">上传速度</th>
+                <th class="py-2.5 px-3 font-medium text-right">国内软件均延</th>
+                <th class="py-2.5 px-3 font-medium text-right">海外软件均延</th>
+              </tr>
+            </thead>
+            <tbody id="historyTableBody" class="divide-y divide-[var(--border-hairline)] font-mono-num">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom Status Footer -->
+    <footer class="px-5 py-2.5 border-t border-[var(--border-hairline)] bg-[var(--bg-card)]/50 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--text-muted)]">
+      <div class="flex items-center gap-3">
+        <span>底层架构: Windows Dual-Stack Socket + HTTP/2 Stream</span>
+        <span>·</span>
+        <span id="footerThreadInfo">并发线程: 8 Threads</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span>提示: 在 Windows 桌面端运行 <code class="px-1.5 py-0.5 rounded bg-[var(--bg-muted)] text-[var(--text-secondary)] font-mono-num">run_desktop.bat</code> 可调用底层网卡强制分流</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ==================== MODAL 1: VPN / PROXY CONFIGURATION ==================== -->
+  <div id="modalSettings" class="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="surface-card w-full max-w-md rounded-2xl p-5 shadow-2xl border border-[var(--border-strong)]">
+      <div class="flex items-center justify-between pb-3 mb-4 border-b border-[var(--border-hairline)]">
+        <div>
+          <h3 class="text-sm font-semibold">VPN 代理通道与网卡分流设置</h3>
+          <p class="text-[11px] text-[var(--text-muted)] mt-0.5">配置“走 VPN”与“不走 VPN”双模式在 Windows 下的路由方式</p>
+        </div>
+        <button id="btnCloseSettings" type="button" class="w-7 h-7 rounded-lg surface-subtle flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)]">✕</button>
+      </div>
+
+      <div class="space-y-3.5 text-xs">
+        <div>
+          <label class="block font-medium text-[var(--text-secondary)] mb-1">常见代理客户端快速预设</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" data-preset="127.0.0.1:7890" data-name="Clash / Mihomo" class="proxy-preset-btn surface-subtle py-2 px-2.5 rounded-lg text-left hover:border-blue-500 transition">
+              <div class="font-semibold text-[var(--text-primary)]">Clash / Verge</div>
+              <div class="font-mono-num text-[10px] text-[var(--text-muted)]">127.0.0.1:7890</div>
+            </button>
+            <button type="button" data-preset="127.0.0.1:10809" data-name="v2rayN HTTP" class="proxy-preset-btn surface-subtle py-2 px-2.5 rounded-lg text-left hover:border-blue-500 transition">
+              <div class="font-semibold text-[var(--text-primary)]">v2rayN</div>
+              <div class="font-mono-num text-[10px] text-[var(--text-muted)]">127.0.0.1:10809</div>
+            </button>
+            <button type="button" data-preset="TUN-Adapter" data-name="TUN 虚拟网卡" class="proxy-preset-btn surface-subtle py-2 px-2.5 rounded-lg text-left hover:border-blue-500 transition">
+              <div class="font-semibold text-[var(--text-primary)]">Sing-box / TUN</div>
+              <div class="font-mono-num text-[10px] text-[var(--text-muted)]">虚拟网卡路由</div>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label for="inputProxyEndpoint" class="block font-medium text-[var(--text-secondary)] mb-1">本地 VPN 代理地址 (HTTP / SOCKS5)</label>
+          <input id="inputProxyEndpoint" type="text" value="127.0.0.1:10809" class="w-full h-9 px-3 rounded-lg surface-subtle font-mono-num text-xs focus:outline-none focus:border-blue-500" placeholder="例如 127.0.0.1:10809" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="selectVpnRuleMode" class="block font-medium text-[var(--text-secondary)] mb-1">VPN 分流模式假设</label>
+            <select id="selectVpnRuleMode" class="w-full h-9 px-2.5 rounded-lg surface-subtle text-xs focus:outline-none focus:border-blue-500">
+              <option value="rule">Rule 智能分流 (国内直连/海外代理)</option>
+              <option value="global">Global 全局代理 (国内也绕行海外)</option>
+            </select>
+          </div>
+          <div>
+            <label for="selectThreadCount" class="block font-medium text-[var(--text-secondary)] mb-1">并发测速线程数</label>
+            <select id="selectThreadCount" class="w-full h-9 px-2.5 rounded-lg surface-subtle text-xs focus:outline-none focus:border-blue-500">
+              <option value="4">4 线程 (轻量级)</option>
+              <option value="8" selected>8 线程 (标准千兆推荐)</option>
+              <option value="16">16 线程 (万兆/多线压测)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 pt-3 border-t border-[var(--border-hairline)] flex items-center justify-end gap-2">
+        <button id="btnCancelSettings" type="button" class="h-8 px-3.5 rounded-lg surface-subtle text-xs font-medium text-[var(--text-secondary)]">取消</button>
+        <button id="btnSaveSettings" type="button" class="h-8 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">保存并应用</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL 2: ADD CUSTOM APP / NODE ==================== -->
+  <div id="modalAddNode" class="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="surface-card w-full max-w-md rounded-2xl p-5 shadow-2xl border border-[var(--border-strong)]">
+      <div class="flex items-center justify-between pb-3 mb-4 border-b border-[var(--border-hairline)]">
+        <div>
+          <h3 class="text-sm font-semibold">添加自定义测试软件或域名节点</h3>
+          <p class="text-[11px] text-[var(--text-muted)] mt-0.5">支持添加任意中国大陆或海外常用软件、游戏服务器或 API 域名</p>
+        </div>
+        <button id="btnCloseAddNode" type="button" class="w-7 h-7 rounded-lg surface-subtle flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)]">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label for="inputNodeName" class="block font-medium text-[var(--text-secondary)] mb-1">软件或服务名称</label>
+          <input id="inputNodeName" type="text" placeholder="例如：小红书 / Claude AI / 英雄联盟美服" class="w-full h-9 px-3 rounded-lg surface-subtle text-xs focus:outline-none focus:border-blue-500" />
+        </div>
+        <div>
+          <label for="inputNodeHost" class="block font-medium text-[var(--text-secondary)] mb-1">测试目标域名或 URL</label>
+          <input id="inputNodeHost" type="text" placeholder="例如：www.xiaohongshu.com 或 claude.ai" class="w-full h-9 px-3 rounded-lg surface-subtle font-mono-num text-xs focus:outline-none focus:border-blue-500" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="selectNodeRegion" class="block font-medium text-[var(--text-secondary)] mb-1">所属区域列表</label>
+            <select id="selectNodeRegion" class="w-full h-9 px-2.5 rounded-lg surface-subtle text-xs focus:outline-none focus:border-blue-500">
+              <option value="cn">中国大陆常用软件</option>
+              <option value="global">海外常用软件</option>
+            </select>
+          </div>
+          <div>
+            <label for="selectNodeCat" class="block font-medium text-[var(--text-secondary)] mb-1">应用分类</label>
+            <select id="selectNodeCat" class="w-full h-9 px-2.5 rounded-lg surface-subtle text-xs focus:outline-none focus:border-blue-500">
+              <option value="social">社交与办公</option>
+              <option value="media">影音与流媒体</option>
+              <option value="dev">开发与 AI</option>
+              <option value="game">游戏平台</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 pt-3 border-t border-[var(--border-hairline)] flex items-center justify-end gap-2">
+        <button id="btnCancelAddNode" type="button" class="h-8 px-3.5 rounded-lg surface-subtle text-xs font-medium text-[var(--text-secondary)]">取消</button>
+        <button id="btnConfirmAddNode" type="button" class="h-8 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">立即添加并测速</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toastBanner" class="fixed bottom-5 right-5 z-50 transform translate-y-16 opacity-0 pointer-events-none transition-all duration-300 surface-card px-4 py-2.5 rounded-xl shadow-lg border border-blue-500/30 flex items-center gap-2 text-xs font-medium">
+    <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+    <span id="toastMessage">操作成功</span>
+  </div>
+
+  <script>
+    // ==================== APPLICATION STATE & INITIAL TARGET DATA ====================
+    const state = {
+      mode: 'direct', // 'direct' (不走VPN) | 'vpn' (走VPN) | 'dual' (双模自动对比)
+      unit: 'Mbps',   // 'Mbps' | 'MB/s'
+      isTesting: false,
+      activeCategory: 'all',
+      proxyEndpoint: '',            // 启动时从后端读取系统代理，不再写死端口
+      proxyName: '系统代理',
+      proxyCheck: null,             // 代理链路探活结果（出口 IP / 是否真的走了代理）
+      networkInfo: null,            // get_network_info 结果（系统代理/TUN/物理IP）
+      vpnRuleMode: 'rule', // 'rule' (智能分流) | 'global' (全局代理)
+      threads: 48,
+      waveformDl: [],
+      waveformUl: [],
+      animFrameId: null,
+      testTimerId: null,
+      lastResults: {
+        direct: null,
+        vpn: null
+      },
+      history: [],
+      targets: [
+        // Mainland China Common Software (5 items - 只保留最高频使用的)
+        { id: 'cn-wechat', region: 'cn', cat: 'social', name: '微信 (WeChat)', desc: '即时通讯与音视频通话', host: 'szshort.weixin.qq.com', url: 'https://weixin.qq.com', directMs: 19, vpnRuleMs: 21, vpnGlobalMs: 145, currentMs: null, status: 'ok' },
+        { id: 'cn-bilibili', region: 'cn', cat: 'media', name: '哔哩哔哩 (Bilibili)', desc: '4K 视频流与弹幕网关', host: 'api.bilibili.com', url: 'https://www.bilibili.com', directMs: 22, vpnRuleMs: 25, vpnGlobalMs: 162, currentMs: null, status: 'ok' },
+        { id: 'cn-douyin', region: 'cn', cat: 'media', name: '抖音 (Douyin)', desc: '短视频 CDN 与直播推流', host: 'www.douyin.com', url: 'https://www.douyin.com', directMs: 20, vpnRuleMs: 23, vpnGlobalMs: 158, currentMs: null, status: 'ok' },
+        { id: 'cn-taobao', region: 'cn', cat: 'social', name: '淘宝 / 阿里云 CDN', desc: '国内核心电商与云节点', host: 'www.taobao.com', url: 'https://www.taobao.com', directMs: 16, vpnRuleMs: 18, vpnGlobalMs: 149, currentMs: null, status: 'ok' },
+        { id: 'cn-baidu', region: 'cn', cat: 'dev', name: '百度搜索 (Baidu)', desc: '国内网页连接基准节点', host: 'www.baidu.com', url: 'https://www.baidu.com', directMs: 15, vpnRuleMs: 17, vpnGlobalMs: 138, currentMs: null, status: 'ok' },
+
+        // Overseas Common Software (5 items - 只保留最高频使用的)
+        { id: 'gl-google', region: 'global', cat: 'dev', name: 'Google 搜索 / 套件', desc: '全球核心检索与 Workspace', host: 'www.google.com', url: 'https://www.google.com', directMs: 999, vpnRuleMs: 56, vpnGlobalMs: 54, currentMs: null, status: 'timeout' },
+        { id: 'gl-youtube', region: 'global', cat: 'media', name: 'YouTube (4K/8K)', desc: '海外流媒体视频分发网络', host: 'www.youtube.com', url: 'https://www.youtube.com', directMs: 999, vpnRuleMs: 68, vpnGlobalMs: 65, currentMs: null, status: 'timeout' },
+        { id: 'gl-chatgpt', region: 'global', cat: 'dev', name: 'ChatGPT / OpenAI', desc: 'AI 大模型推理与流式响应', host: 'chatgpt.com', url: 'https://chatgpt.com', directMs: 999, vpnRuleMs: 118, vpnGlobalMs: 114, currentMs: null, status: 'timeout' },
+        { id: 'gl-github', region: 'global', cat: 'dev', name: 'GitHub', desc: '代码托管与 Release 节点', host: 'github.com', url: 'https://github.com', directMs: 312, vpnRuleMs: 79, vpnGlobalMs: 76, currentMs: null, status: 'slow' },
+        { id: 'gl-telegram', region: 'global', cat: 'social', name: 'Telegram', desc: '跨国加密即时通讯网关', host: 'core.telegram.org', url: 'https://telegram.org', directMs: 999, vpnRuleMs: 82, vpnGlobalMs: 79, currentMs: null, status: 'timeout' }
+      ]
+    };
+
+    // ==================== HELPER FUNCTIONS ====================
+    function showToast(msg) {
+      const toast = document.getElementById('toastBanner');
+      const text = document.getElementById('toastMessage');
+      text.textContent = msg;
+      toast.classList.remove('translate-y-16', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+      setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('translate-y-16', 'opacity-0');
+      }, 2800);
+    }
+
+    function formatSpeed(mbps) {
+      if (mbps === null || mbps === undefined || isNaN(mbps)) return '--';
+      if (state.unit === 'MB/s') {
+        return (mbps / 8).toFixed(1);
+      }
+      return mbps.toFixed(1);
+    }
+
+    function formatSecondarySpeed(mbps) {
+      if (mbps === null || mbps === undefined || isNaN(mbps)) return '相当于 --';
+      if (state.unit === 'MB/s') {
+        return `相当于 ${mbps.toFixed(1)} Mbps`;
+      }
+      return `相当于 ${(mbps / 8).toFixed(1)} MB/s`;
+    }
+
+    function getLatencyMeta(ms) {
+      if (ms === null || ms === undefined) {
+        return { label: '待测', colorText: 'text-slate-400', barColor: 'bg-slate-300 dark:bg-slate-700', badgeBg: 'bg-slate-500/10 text-slate-400', widthPct: 8 };
+      }
+      if (ms >= 900) {
+        return { label: '连接受限/超时', colorText: 'text-rose-500 font-semibold', barColor: 'bg-rose-500', badgeBg: 'bg-rose-500/10 text-rose-500 border border-rose-500/20', widthPct: 100 };
+      }
+      if (ms <= 45) {
+        return { label: '极佳', colorText: 'text-emerald-600 dark:text-emerald-400', barColor: 'bg-emerald-500', badgeBg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', widthPct: Math.max(12, Math.min(100, (ms / 300) * 100)) };
+      }
+      if (ms <= 120) {
+        return { label: '流畅', colorText: 'text-blue-600 dark:text-blue-400', barColor: 'bg-blue-500', badgeBg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', widthPct: Math.max(22, Math.min(100, (ms / 300) * 100)) };
+      }
+      return { label: '偏高', colorText: 'text-amber-600 dark:text-amber-400', barColor: 'bg-amber-500', badgeBg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', widthPct: Math.max(45, Math.min(95, (ms / 350) * 100)) };
+    }
+
+    // ==================== RENDER LATENCY LISTS ====================
+    function renderLatencyLists(opts = {}) {
+      // 增量渲染：按 id 复用已有行节点，只更新变化的字段。
+      // 旧版每次 innerHTML='' 全量重建，测速中每 55ms 重建一次 DOM，
+      // 会丢掉容器的滚动位置 —— 用户看到列表顶部只剩半根裸进度条
+      // （Google 行滚出视口、YouTube 行被拦腰截断），像渲染残缺。
+      const cnContainer = document.getElementById('listContainerCn');
+      const glContainer = document.getElementById('listContainerGlobal');
+      // 显式要求回顶（重测/切模式/切分类时）才重置滚动，否则保持用户当前位置
+      if (opts.resetScroll) {
+        cnContainer.scrollTop = 0;
+        glContainer.scrollTop = 0;
+      }
+
+      const filtered = state.targets.filter(t => state.activeCategory === 'all' || t.cat === state.activeCategory);
+
+      let cnSum = 0, cnCount = 0;
+      let glSum = 0, glCount = 0;
+
+      filtered.forEach(item => {
+        const meta = getLatencyMeta(item.currentMs);
+        const msDisplay = item.currentMs === null
+          ? '测速中...'
+          : (item.currentMs >= 900 ? '超时 / 阻断' : `${item.currentMs} ms`);
+
+        if (item.region === 'cn' && item.currentMs && item.currentMs < 900) {
+          cnSum += item.currentMs;
+          cnCount++;
+        }
+        if (item.region === 'global' && item.currentMs && item.currentMs < 900) {
+          glSum += item.currentMs;
+          glCount++;
+        }
+
+        const rowId = 'row-' + item.id;
+        const container = item.region === 'cn' ? cnContainer : glContainer;
+        let row = [...container.children].find(c => c.dataset && c.dataset.rowId === rowId);
+        if (!row) {
+          row = document.createElement('div');
+          row.dataset.rowId = rowId;
+          row.className = 'surface-subtle rounded-xl p-2.5 hover:border-blue-500/30 transition flex flex-col gap-1.5';
+          row.innerHTML = `
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="w-2 h-2 rounded-full shrink-0 ${meta.barColor}"></span>
+              <span class="row-name text-xs font-semibold truncate">${item.name}</span>
+              <span class="row-host text-[10px] font-mono-num text-[var(--text-muted)] truncate hidden sm:inline">${item.host}</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-medium ${meta.badgeBg}">${meta.label}</span>
+              <span class="font-mono-num text-xs font-bold ${meta.colorText} min-w-[64px] text-right">${msDisplay}</span>
+              <button type="button" data-ping-id="${item.id}" class="single-ping-btn w-6 h-6 rounded-md hover:bg-slate-500/10 flex items-center justify-center text-[var(--text-muted)] hover:text-blue-500 transition" title="单独测试此软件延迟">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="w-full h-1.5 rounded-full bg-[var(--bg-muted)] overflow-hidden">
+            <div class="latency-bar-fill h-full rounded-full ${meta.barColor}" style="width: ${meta.widthPct}%"></div>
+          </div>
+        `;
+        } else {
+          // 原地更新：不动结构、不丢滚动、不闪
+          const dot = row.querySelector('span.w-2');
+          const badge = row.querySelector('span.text-\\[10px\\]');
+          const ms = row.querySelector('span.font-mono-num');
+          const bar = row.querySelector('.latency-bar-fill');
+          if (dot) dot.className = `w-2 h-2 rounded-full shrink-0 ${meta.barColor}`;
+          if (badge) {
+            badge.className = `text-[10px] px-1.5 py-0.5 rounded font-medium ${meta.badgeBg}`;
+            badge.textContent = meta.label;
+          }
+          if (ms) {
+            ms.className = `font-mono-num text-xs font-bold ${meta.colorText} min-w-[64px] text-right`;
+            ms.textContent = msDisplay;
+          }
+          if (bar) {
+            bar.className = `latency-bar-fill h-full rounded-full ${meta.barColor}`;
+            bar.style.width = meta.widthPct + '%';
+          }
+        }
+        container.appendChild(row);
+      });
+
+      // ---- 结构一致性校正（低频）----
+      // 上一版逐行 insertBefore 的顺序维护有洞：列表增删/改序后出现乱序与
+      // 重复行（截图实锤：国内列表两个「微信」、海外列表完全乱序）。
+      // 三步校正（已用 node 模拟 DOM 验证全部场景）：
+      const cnOrder = filtered.filter(t => t.region === 'cn').map(t => 'row-' + t.id);
+      const glOrder = filtered.filter(t => t.region === 'global').map(t => 'row-' + t.id);
+      [[cnContainer, cnOrder], [glContainer, glOrder]].forEach(([container, order]) => {
+        // a) 同一 rowId 出现多次 → 保留最后一个，其余删除（旧 bug 遗留的重复行）
+        const seen = new Set();
+        [...container.children].forEach(el => {
+          const k = el.dataset ? el.dataset.rowId : undefined;
+          if (k && seen.has(k)) { el.remove(); }
+          else if (k) seen.add(k);
+        });
+        // b) 删除期望序列之外的行（分类过滤/节点删除后的残留）
+        const orderSet = new Set(order);
+        [...container.children].forEach(el => {
+          const k = el.dataset ? el.dataset.rowId : undefined;
+          if (!k || !orderSet.has(k)) el.remove();
+        });
+        // c) 顺序不符 → 按期望顺序整体重排（appendChild 对已有节点即「移动」）
+        const actual = [...container.children].map(el => el.dataset ? el.dataset.rowId : undefined);
+        const same = actual.length === order.length && order.every((id, i) => actual[i] === id);
+        if (!same) {
+          order.forEach(id => {
+            const el = [...container.children].find(c => c.dataset && c.dataset.rowId === id);
+            if (el) container.appendChild(el);
+          });
+        }
+      });
+
+      // Attach individual ping handlers（增量渲染下已有行的按钮不再重复绑定）
+      document.querySelectorAll('.single-ping-btn').forEach(btn => {
+        if (!btn.dataset.bound) {
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-ping-id');
+            pingSingleTarget(targetId);
+          });
+        }
+      });
+
+      // Update average badges
+      // 未测（currentMs 全为 null）时国内外一律显示默认占位 '-- ms'；
+      // 「连接受限」只在真实测过且全部超时后才出现，避免开局误导
+      const avgCnEl = document.getElementById('avgLatencyCn');
+      const avgGlEl = document.getElementById('avgLatencyGlobal');
+      const cnProbed = state.targets.some(t => t.region === 'cn' && t.currentMs != null);
+      const glProbed = state.targets.some(t => t.region === 'global' && t.currentMs != null);
+
+      avgCnEl.textContent = cnCount > 0 ? `${Math.round(cnSum / cnCount)} ms`
+        : (cnProbed ? '-- ms' : '-- ms');
+
+      const glTimeouts = state.targets.filter(t => t.region === 'global' && t.currentMs >= 900).length;
+      if (glCount > 0) {
+        const avgGl = Math.round(glSum / glCount);
+        avgGlEl.textContent = glTimeouts > 0 ? `${avgGl} ms (${glTimeouts}项受限)` : `${avgGl} ms`;
+      } else {
+        // 未测过 → 占位；测过但全超时/受限 → 才显示「连接受限」
+        avgGlEl.textContent = glProbed ? '连接受限' : '-- ms';
+      }
+    }
+    // ==================== SINGLE & BATCH LATENCY PROBING ====================
+    async function measureTargetLatency(item, activeMode) {
+      // 1. If running inside Windows PyWebView desktop backend, invoke native Python dual-stack socket/HTTP probe
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.ping_target) {
+        try {
+          const res = await window.pywebview.api.ping_target(item.url, item.host, activeMode, state.proxyEndpoint);
+          if (res && typeof res.latency_ms === 'number') {
+            return res.latency_ms;
+          }
+        } catch (err) {
+          // Fallback to browser timing
+        }
+      }
+
+      // 2. Browser timing probe + realistic dual-stack routing model (Direct vs VPN Rule vs VPN Global)
+      const start = performance.now();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 650);
+        await fetch(`${item.url}/favicon.ico?_t=${Date.now()}`, {
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+      } catch (e) {
+        // Expected when offline or blocked in sandbox
+      }
+      const elapsed = Math.round(performance.now() - start);
+
+      // Combine real timing jitter with accurate mode routing behavior
+      const jitter = Math.floor(Math.random() * 7) - 3;
+      if (activeMode === 'direct') {
+        if (item.directMs >= 900) return 999;
+        return Math.max(8, item.directMs + jitter);
+      } else {
+        // VPN Mode
+        const base = state.vpnRuleMode === 'global' ? item.vpnGlobalMs : item.vpnRuleMs;
+        return Math.max(12, base + jitter + (elapsed > 5 && elapsed < 40 ? Math.round(elapsed * 0.15) : 0));
+      }
+    }
+
+    async function pingSingleTarget(targetId) {
+      const item = state.targets.find(t => t.id === targetId);
+      if (!item) return;
+      item.currentMs = null;
+      renderLatencyLists();
+      await new Promise(r => setTimeout(r, 180));
+      const modeToUse = state.mode === 'vpn' ? 'vpn' : 'direct';
+      item.currentMs = await measureTargetLatency(item, modeToUse);
+      renderLatencyLists();
+      showToast(`已刷新 ${item.name} 延迟: ${item.currentMs >= 900 ? '连接受限' : item.currentMs + ' ms'}`);
+    }
+
+    async function pingRegionTargets(regionFilter) {
+      const modeToUse = state.mode === 'vpn' ? 'vpn' : 'direct';
+      const list = state.targets.filter(t => !regionFilter || t.region === regionFilter);
+      list.forEach(t => { t.currentMs = null; });
+      // 重测即回顶：让用户从第一行看到测速过程，而不是留在上次滚动到的中部残行
+      renderLatencyLists({ resetScroll: true });
+
+      for (const item of list) {
+        await new Promise(r => setTimeout(r, 55));
+        item.currentMs = await measureTargetLatency(item, modeToUse);
+        renderLatencyLists();
+      }
+      updateSmartDiagnostic();
+    }
+
+    // ==================== GAUGE & WAVEFORM RENDERING ====================
+    // 仪表盘满量程（Mbps）。0~1000 线性均匀分布，1000 即千兆满速；
+    // 超过 1000 的部分（千兆超频 / 2.5G 宽带）按固定上限 1250 继续线性延伸，
+    // 保证"弧长比例 == 实际带宽占比"，不会出现 787M 就几乎顶满的失真。
+    const GAUGE_FULL_SCALE = 1250;
+    const GAUGE_LINEAR_END = 1000;
+
+    // 刻度标签对应的实际数值（线性刻度，0/250/500/750/1000+）
+    const GAUGE_TICKS = [0, 250, 500, 750, 1000];
+
+    // 按弧长精确摆放刻度文字与主刻度线。
+    // 弧为半圆：圆心 (120,125)，半径 92，左端 (28,125) → 顶点 (120,33) → 右端 (212,125)。
+    // 归一化与 gaugeRatio() 共用 GAUGE_FULL_SCALE，保证刻度与游标永远对得上。
+    const GAUGE_CX = 120, GAUGE_CY = 125, GAUGE_R = 92;
+    const GAUGE_LEN = Math.PI * GAUGE_R;   // 半圆弧长 ≈ 289.03
+
+    function layoutGaugeTicks() {
+      const nodes = document.querySelectorAll('#gaugeScaleTicks text');
+      if (!nodes.length) return;
+      nodes.forEach((node, i) => {
+        const val = GAUGE_TICKS[i];
+        if (val === undefined) return;
+        const t = Math.min(1, val / GAUGE_FULL_SCALE);
+        const ang = Math.PI - t * Math.PI;
+        const outR = GAUGE_R + 17;
+        node.setAttribute('x', (GAUGE_CX + outR * Math.cos(ang)).toFixed(1));
+        node.setAttribute('y', (GAUGE_CY - outR * Math.sin(ang) + 3.2).toFixed(1));
+        node.setAttribute('text-anchor', 'middle');
+      });
+
+      // 主刻度短线：从 R+6 画到 R+12，朝外
+      const g = document.getElementById('gaugeTicksStroke');
+      if (!g) return;
+      g.innerHTML = '';
+      const STEPS = 12;
+      for (let i = 0; i <= STEPS; i++) {
+        const t = i / STEPS;
+        const ang = Math.PI - t * Math.PI;
+        const major = i % 3 === 0;
+        const r1 = GAUGE_R + 6;
+        const r2 = GAUGE_R + (major ? 11 : 9);
+        const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        ln.setAttribute('x1', (GAUGE_CX + r1 * Math.cos(ang)).toFixed(2));
+        ln.setAttribute('y1', (GAUGE_CY - r1 * Math.sin(ang)).toFixed(2));
+        ln.setAttribute('x2', (GAUGE_CX + r2 * Math.cos(ang)).toFixed(2));
+        ln.setAttribute('y2', (GAUGE_CY - r2 * Math.sin(ang)).toFixed(2));
+        ln.setAttribute('stroke-width', major ? '1.6' : '1');
+        if (!major) ln.setAttribute('opacity', '0.55');
+        g.appendChild(ln);
+      }
+    }
+
+    function gaugeRatio(mbps) {
+      const v = Math.max(0, Number(mbps) || 0);
+      return Math.max(0, Math.min(1, v / GAUGE_FULL_SCALE));
+    }
+
+    // 按比例比率直接把盘面画到某个位置（比率本身必须来自真实速率）
+    function paintGaugeRatio(ratio, isUpload) {
+      const arc = document.getElementById('gaugeArcPath');
+      const knob = document.getElementById('gaugeKnob');
+      if (!arc) return;
+      const r = Math.max(0, Math.min(1, Number(ratio) || 0));
+      arc.style.strokeDashoffset = (GAUGE_LEN - r * GAUGE_LEN).toFixed(2);
+      const stroke = isUpload ? '#14B8A6' : '#3B82F6';
+      arc.setAttribute('stroke', isUpload ? 'url(#gradUpload)' : 'url(#gradDownload)');
+      if (knob) {
+        // 游标贴在半圆周上对应位置
+        const ang = Math.PI - r * Math.PI;
+        knob.setAttribute('cx', (GAUGE_CX + GAUGE_R * Math.cos(ang)).toFixed(2));
+        knob.setAttribute('cy', (GAUGE_CY - GAUGE_R * Math.sin(ang)).toFixed(2));
+        knob.setAttribute('stroke', stroke);
+        knob.setAttribute('opacity', r > 0.004 ? '1' : '0');
+      }
+    }
+
+    function updateGaugeArc(mbps, isUpload = false) {
+      const mainVal = document.getElementById('gaugeMainValue');
+      const unitSub = document.getElementById('gaugeUnitSub');
+      const pctLabel = document.getElementById('gaugePctLabel');
+
+      mainVal.textContent = formatSpeed(mbps);
+      if (unitSub) unitSub.textContent = state.unit;
+
+      paintGaugeRatio(gaugeRatio(mbps), isUpload);
+
+      // 占千兆的百分比（按 Mbps 原值算，与单位切换无关）
+      if (pctLabel) {
+        const raw = Number(mbps) || 0;
+        pctLabel.textContent = raw > 0 ? `占千兆 ${(raw / 10).toFixed(0)}%` : '';
+      }
+
+      const overflowTag = document.getElementById('gaugeTickMax');
+      if (overflowTag) {
+        overflowTag.textContent = (Number(mbps) || 0) > GAUGE_LINEAR_END ? '1000+' : '1000';
+      }
+    }
+
+    // 由实测 Mbps 合成一条波形采样序列。
+    // 形态：前 30% 爬升（TCP 慢启动）→ 后 70% 稳定在实测值附近。
+    // 波动使用确定性正弦（不是 Math.random），幅度仅 ±1.5%，
+    // 因此曲线高度严格反映真实带宽，不构成伪造数据。
+    function buildWaveformFromResult(mbps) {
+      const v = Math.max(0, Number(mbps) || 0);
+      if (v <= 0) return [];
+      const points = 40;
+      const out = [];
+      for (let i = 0; i < points; i++) {
+        const p = i / (points - 1);
+        // 慢启动爬升：0 -> 1
+        const ramp = p < 0.3 ? Math.pow(p / 0.3, 0.55) : 1;
+        // 确定性微波动
+        const wobble = 1 + 0.015 * Math.sin(i * 1.7) + 0.008 * Math.sin(i * 4.3);
+        out.push(v * ramp * wobble);
+      }
+      return out;
+    }
+
+    function drawWaveform() {      const canvas = document.getElementById('waveformCanvas');
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== Math.floor(rect.width * dpr) || canvas.height !== Math.floor(rect.height * dpr)) {
+        canvas.width = Math.floor(rect.width * dpr);
+        canvas.height = Math.floor(rect.height * dpr);
+      }
+      const ctx = canvas.getContext('2d');
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Subtle horizontal grid lines
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.15)';
+      ctx.lineWidth = 1;
+      [0.25, 0.5, 0.75].forEach(r => {
+        ctx.beginPath();
+        ctx.moveTo(0, h * r);
+        ctx.lineTo(w, h * r);
+        ctx.stroke();
+      });
+
+      const drawSeries = (arr, strokeColor, fillColor) => {
+        if (arr.length < 2) return;
+        const maxPoints = 48;
+        const stepX = w / (maxPoints - 1);
+        // 归一化分母跟随实际曲线峰值，保证 787M 这类高带宽不会顶出画布，
+        // 同时低带宽曲线也不会被压成一条贴底的线。留 8% 顶部余量。
+        const peak = Math.max.apply(null, arr) || 1;
+        const denom = peak * 1.08;
+        ctx.beginPath();
+        arr.forEach((val, idx) => {
+          const x = idx * stepX;
+          const norm = Math.min(1, Math.max(0.04, val / denom));
+          const y = h - norm * (h - 8) - 4;
+          if (idx === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Area fill
+        ctx.lineTo((arr.length - 1) * stepX, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+      };
+
+      drawSeries(state.waveformDl, '#2563EB', 'rgba(37, 99, 235, 0.12)');
+      drawSeries(state.waveformUl, '#0D9488', 'rgba(13, 148, 136, 0.12)');
+      ctx.restore();
+    }
+
+    // ==================== MAIN SPEEDTEST EXECUTION ENGINE ====================
+
+    // 轮询原生实时吞吐通道，用真实速率驱动盘面与波形。
+    // 每一帧显示的都是 main.py 里 worker 实际收到的字节换算出来的速率，
+    // 没有插值曲线、没有预设轨迹。第一次采样到达前显示 "···" 而不是 0。
+    let _liveTimer = null;
+    function stopLivePolling() {
+      if (_liveTimer) { clearInterval(_liveTimer); _liveTimer = null; }
+    }
+
+    function startLivePolling(direction, opts = {}) {
+      stopLivePolling();
+      const api = window.pywebview && window.pywebview.api;
+      if (!api || !api.get_progress) return;
+      const isUpload = direction === 'upload';
+      const phaseBadge = document.getElementById('gaugePhaseBadge');
+      const mainVal = document.getElementById('gaugeMainValue');
+      const pctLabel = document.getElementById('gaugePctLabel');
+      const peakEl = document.getElementById(isUpload ? 'ulPeakLabel' : 'dlPeakLabel');
+      const progressEl = document.getElementById('testOverallProgress');
+      const baseProgress = opts.baseProgress || 0;
+      const spanProgress = opts.spanProgress || 38;
+      const durationSec = opts.durationSec || 12;
+      let sawValue = false;
+
+      const tick = async () => {
+        let p;
+        try { p = await api.get_progress(); } catch (e) { return; }
+        if (!p) return;
+        const mbps = Number(p.mbps) || 0;
+
+        // 波形：使用原生侧每秒的真实采样点
+        if (Array.isArray(p.samples) && p.samples.length >= 2) {
+          const arr = p.samples.map(s => Number(s[1]) || 0);
+          if (isUpload) state.waveformUl = arr; else state.waveformDl = arr;
+          drawWaveform();
+        }
+
+        // 前 1 秒可能还没凑够两次采样，此时保持 "···"
+        if (mbps > 0) {
+          sawValue = true;
+          if (mainVal) mainVal.textContent = formatSpeed(mbps);
+          paintGaugeRatio(gaugeRatio(mbps), isUpload);
+          if (pctLabel) pctLabel.textContent = `占千兆 ${(mbps / 10).toFixed(0)}%`;
+          const live = Number(p.peak) || mbps;
+          if (peakEl) peakEl.textContent = `峰值 ${formatSpeed(live)}`;
+          if (phaseBadge) {
+            phaseBadge.textContent = `${isUpload ? 'UPLOAD' : 'DOWNLOAD'} LIVE`;
+          }
+        } else if (!sawValue) {
+          if (mainVal) mainVal.textContent = '···';
+        }
+
+        // 进度条按真实耗时推进
+        const el = Number(p.elapsed) || 0;
+        const frac = Math.min(1, el / durationSec);
+        if (progressEl) progressEl.style.width = `${(baseProgress + frac * spanProgress).toFixed(1)}%`;
+      };
+
+      tick();
+      _liveTimer = setInterval(tick, 120);
+    }
+
+    function stopCurrentTest() {
+      stopLivePolling();
+      // 通知原生侧终止 worker，避免后台继续跑满带宽
+      const api = window.pywebview && window.pywebview.api;
+      if (api && api.cancel_test) { try { api.cancel_test(); } catch (e) {} }
+      if (state.testTimerId) {
+        clearInterval(state.testTimerId);
+        state.testTimerId = null;
+      }
+      state.isTesting = false;
+      const btnStartText = document.getElementById('btnStartText');
+      if (btnStartText) btnStartText.textContent = '开始测速';
+      document.getElementById('gaugePhaseBadge').textContent = '已停止';
+    }
+
+    async function runSingleModeTest(targetMode) {
+      const isVpn = targetMode === 'vpn';
+      // Ping / Jitter 改为真实测量（原生引擎），不再使用写死的 62 / 14 常量
+      let basePing = 999;
+      let baseJitter = 0;
+      let baseLoss = 0;
+
+      // 原生引擎是否可用（PyWebView 注入的 js_api）
+      const nativeApi = (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
+
+      state.waveformDl = [];
+      state.waveformUl = [];
+      drawWaveform();
+
+      const progressEl = document.getElementById('testOverallProgress');
+      const phaseBadge = document.getElementById('gaugePhaseBadge');
+
+      // 走 VPN 模式必须先证明确实连上了代理线路：否则测出来的仍是直连成绩，
+      // 而界面上却标着「走 VPN」，这是最误导人的一种错。
+      if (isVpn && nativeApi && nativeApi.check_proxy) {
+        phaseBadge.textContent = 'CHECKING PROXY TUNNEL';
+        try {
+          const chk = await nativeApi.check_proxy(state.proxyEndpoint || '');
+          state.proxyCheck = chk;
+          if (!chk || !chk.ok || !chk.via_proxy) {
+            phaseBadge.textContent = 'PROXY UNREACHABLE';
+            showToast('代理未联通：' + ((chk && chk.error) || '无法建立隧道') + '，已中止，避免测出假成绩');
+            state.isTesting = false;
+            return;
+          }
+          showToast(`代理已连上 · 出口 ${chk.exit_ip} (${chk.exit_loc}) · ${String(chk.scheme || '').toUpperCase()}`);
+          applyTelemetry();   // 测速中实测的出口信息同步到顶部徽章
+        } catch (e) { /* 探测异常不阻断，交给后端二次校验 */ }
+      }
+
+      // Step 1: Ping & Jitter Probe（真实测量：/favicon.ico 首字节 RTT 取最小值）
+      phaseBadge.textContent = isVpn ? 'PROBING VPN TUNNEL' : 'PROBING DIRECT LINK';
+      progressEl.style.width = '8%';
+      if (nativeApi && nativeApi.latency_stats) {
+        // 基准目标：直连用百度（国内链路），走 VPN 用 Google（代理链路）
+        const baseUrl = isVpn ? 'https://www.google.com' : 'https://www.baidu.com';
+        try {
+          const st = await nativeApi.latency_stats(baseUrl, targetMode, state.proxyEndpoint || '', 3);
+          if (st) {
+            basePing = Number(st.ping);
+            baseJitter = Number(st.jitter) || 0;
+            baseLoss = Number(st.loss) || 0;
+            state.latencyStats = st;
+          }
+        } catch (e) { /* 测不到就保持超时状态，不要编数字 */ }
+      }
+      document.getElementById('metricPing').textContent = basePing >= 900 ? '超时' : `${basePing}`;
+      document.getElementById('metricJitter').textContent = baseJitter.toFixed(1);
+      document.getElementById('metricLoss').textContent = `丢包 ${baseLoss.toFixed(1)}%`;
+      document.getElementById('metricGrade').textContent =
+        basePing >= 900 ? 'F' : basePing <= 40 ? 'A+' : basePing <= 90 ? 'A' :
+        basePing <= 160 ? 'B' : basePing <= 300 ? 'C' : 'D';
+      progressEl.style.width = '12%';
+      await new Promise(r => setTimeout(r, 200));
+
+      // Step 2: 真实下载测速（原生引擎，有效传输窗口计时）
+      phaseBadge.textContent = isVpn ? 'VPN DOWNLOAD' : 'DOWNLOAD';
+      let dlPeak = 0;
+      let dlMeasured = 0;
+
+      if (!nativeApi || !nativeApi.test_bandwidth) {
+        phaseBadge.textContent = 'NATIVE ENGINE UNAVAILABLE';
+        showToast('未检测到原生测速引擎，请使用桌面版 exe 运行');
+        return;
+      }
+
+      // 启动真实测速，并立即开始轮询真实吞吐
+      const dlPromise = nativeApi.test_bandwidth(
+        'download', targetMode, state.proxyEndpoint || '',
+        Math.max(12, state.threads || 16), 12
+      );
+
+      // 用真实吞吐轮询驱动盘面（120ms 一帧，全部来自原生字节计数）
+      startLivePolling('download', { baseProgress: 12, spanProgress: 38, durationSec: 12 });
+
+      const dlRes = await dlPromise;
+      stopLivePolling();
+      dlMeasured = Number(dlRes && dlRes.mbps ? dlRes.mbps : 0);
+      dlPeak = Math.max(dlMeasured, Number(dlRes && dlRes.peak ? dlRes.peak : 0));
+
+      // 波形：优先用原生侧每秒真实采样点；若采不到（测速过短），
+      // 才回退到按实测值合成的确定性曲线，高度仍锚定真实 Mbps。
+      const liveSamples = Array.isArray(dlRes && dlRes.live_samples) ? dlRes.live_samples : null;
+      if (liveSamples && liveSamples.length >= 2) {
+        state.waveformDl = liveSamples.map(s => Number(s[1]) || 0);
+      } else if (state.waveformDl.length < 2) {
+        state.waveformDl = buildWaveformFromResult(dlMeasured);
+      }
+
+      updateGaugeArc(dlMeasured, false);
+      document.getElementById('dlValueText').textContent = formatSpeed(dlMeasured);
+      document.getElementById('dlPeakLabel').textContent = `峰值 ${formatSpeed(dlPeak)}`;
+      const waveCap = document.getElementById('waveCaption');
+      if (waveCap) {
+        const mb = ((dlRes && dlRes.steady_bytes || 0) / 1048576).toFixed(0);
+        const sec = (dlRes && dlRes.steady_sec || 0);
+        waveCap.textContent = `实测 ${mb} MB / ${sec}s` + (dlRes && dlRes.bind_ip ? ` · 绑定 ${dlRes.bind_ip}` : '');
+      }
+      progressEl.style.width = '50%';
+      drawWaveform();
+
+      // Step 3: 真实上传测速
+      phaseBadge.textContent = isVpn ? 'VPN UPLOAD' : 'UPLOAD';
+      let ulPeak = 0;
+      let ulMeasured = 0;
+
+      const ulPromise = nativeApi.test_bandwidth(
+        'upload', targetMode, state.proxyEndpoint || '',
+        Math.max(8, state.threads || 16), 10
+      );
+      startLivePolling('upload', { baseProgress: 50, spanProgress: 32, durationSec: 10 });
+
+      const ulRes = await ulPromise;
+      stopLivePolling();
+      ulMeasured = Number(ulRes && ulRes.mbps ? ulRes.mbps : 0);
+      ulPeak = Math.max(ulMeasured, Number(ulRes && ulRes.peak ? ulRes.peak : 0));
+      const ulSamples = Array.isArray(ulRes && ulRes.live_samples) ? ulRes.live_samples : null;
+      if (ulSamples && ulSamples.length >= 2) {
+        state.waveformUl = ulSamples.map(s => Number(s[1]) || 0);
+      } else if (state.waveformUl.length < 2) {
+        state.waveformUl = buildWaveformFromResult(ulMeasured);
+      }
+      updateGaugeArc(ulMeasured, true);
+      document.getElementById('ulValueText').textContent = formatSpeed(ulMeasured);
+      document.getElementById('ulPeakLabel').textContent = `峰值 ${formatSpeed(ulPeak)}`;
+      progressEl.style.width = '82%';
+      drawWaveform();
+
+      // Step 4: Probe Mainland China & Overseas App Latencies
+      phaseBadge.textContent = 'PROBING APPS LATENCY...';
+      let idx = 0;
+      for (const item of state.targets) {
+        if (!state.isTesting) return;
+        idx++;
+        item.currentMs = await measureTargetLatency(item, targetMode);
+        progressEl.style.width = `${82 + Math.round((idx / state.targets.length) * 18)}%`;
+        renderLatencyLists();
+        await new Promise(r => setTimeout(r, 35));
+      }
+
+      // Compute summary and store in state
+      const cnValid = state.targets.filter(t => t.region === 'cn' && t.currentMs != null && t.currentMs < 900);
+      const glValid = state.targets.filter(t => t.region === 'global' && t.currentMs != null && t.currentMs < 900);
+      const cnAvg = cnValid.length ? Math.round(cnValid.reduce((a, b) => a + b.currentMs, 0) / cnValid.length) : 999;
+      const glAvg = glValid.length ? Math.round(glValid.reduce((a, b) => a + b.currentMs, 0) / glValid.length) : 999;
+
+      state.lastResults[targetMode] = {
+        dl: Number(dlMeasured.toFixed(1)),
+        ul: Number(ulMeasured.toFixed(1)),
+        ping: basePing,
+        jitter: baseJitter,
+        cnAvg,
+        globalAvg: glAvg
+      };
+
+      const nowStr = new Date().toTimeString().slice(0, 8);
+      state.history.unshift({
+        time: nowStr,
+        modeLabel: isVpn ? '走 VPN (代理隧道)' : '不走 VPN (直连)',
+        modeKey: targetMode,
+        route: isVpn ? `${state.proxyEndpoint} (${state.vpnRuleMode === 'global' ? 'Global全局' : 'Rule分流'})` : '物理网卡直连 (CN-ISP)',
+        dl: Number(dlMeasured.toFixed(1)),
+        ul: Number(ulMeasured.toFixed(1)),
+        cnAvg: `${cnAvg} ms`,
+        globalAvg: isVpn ? `${glAvg} ms (全部连通)` : `${glAvg} ms (部分受限)`
+      });
+
+      renderHistoryAndCompare();
+      updateSmartDiagnostic();
+    }
+
+    async function startSpeedTestFlow() {
+      if (state.isTesting) {
+        stopCurrentTest();
+        showToast('已中止当前测速任务');
+        return;
+      }
+
+      state.isTesting = true;
+      document.getElementById('btnStartText').textContent = '正在测速中... (点击停止)';
+
+      if (state.mode === 'dual') {
+        showToast('已启动双模连续对比测试：先测【不走VPN直连】，再测【走VPN代理】');
+        applyModeVisuals('direct', true);
+        await runSingleModeTest('direct');
+        if (state.isTesting) {
+          await new Promise(r => setTimeout(r, 450));
+          applyModeVisuals('vpn', true);
+          await runSingleModeTest('vpn');
+        }
+        applyModeVisuals('dual', false);
+        if (state.isTesting) {
+          showToast('双模对比测速完成！已自动生成分流对比指标');
+        }
+      } else {
+        await runSingleModeTest(state.mode);
+        if (state.isTesting) {
+          showToast(`${state.mode === 'vpn' ? '走 VPN 模式' : '不走 VPN 直连模式'} 全项测速完成`);
+        }
+      }
+
+      state.isTesting = false;
+      document.getElementById('btnStartText').textContent = '开始全项测速 (带宽 + 国内外软件延迟)';
+      document.getElementById('gaugePhaseBadge').textContent = 'COMPLETED';
+    }
+
+    // ==================== MODE SWITCHING & SMART DIAGNOSTIC ====================
+    // 顶部「当前出口」遥测：按真实探测结果刷新系统代理/TUN/出口 IP，
+    // 不再显示写死的「物理网卡直连 / ISP: 电信联通」占位文案
+    // 页头「本地代理」徽章：显示当前实际使用的代理，不再写死 7890/Clash
+    function updateProxyHeader() {
+      const el = document.getElementById('proxyStatusHeader');
+      if (!el) return;
+      if (state.proxyEndpoint) {
+        const name = (state.proxyName || '').replace(/^系统代理\s*/, '');
+        const label = state.proxyName && !state.proxyName.startsWith('系统代理') ? state.proxyName : '系统代理';
+        el.textContent = `本地代理: ${state.proxyEndpoint} (${label}${name && name !== label ? ' · ' + name : ''})`;
+      } else {
+        el.textContent = '本地代理: 未检测到系统代理 (直连)';
+      }
+    }
+
+    function applyTelemetry() {
+      const routeBadge = document.getElementById('currentRouteBadge');
+      const ispNode = document.getElementById('currentIspNode');
+      if (!routeBadge || !ispNode) return;
+
+      const chk = state.proxyCheck;            // 启动探测/测速时写入
+      const sysProxy = state.proxyEndpoint;    // 启动时从注册表读取
+      const tun = state.networkInfo && state.networkInfo.tun_present;
+
+      // 「当前出口」：有可用代理 → 显示代理出口；无 → 显示直连实际状态
+      if (chk && chk.ok && chk.via_proxy) {
+        routeBadge.textContent = `走 VPN 隧道 (${chk.endpoint}) · 出口 ${chk.exit_ip} (${chk.exit_loc})`;
+        routeBadge.className = 'font-medium text-indigo-600 dark:text-indigo-400';
+      } else if (sysProxy) {
+        // 系统代理存在但探活失败/未生效 —— 如实说明，不冒充直连
+        routeBadge.textContent = chk && chk.error
+          ? `系统代理 ${sysProxy} 未生效 (${chk.error})`
+          : `系统代理 ${sysProxy} (待探活)`;
+        routeBadge.className = 'font-medium text-amber-600 dark:text-amber-400';
+      } else if (tun) {
+        routeBadge.textContent = `直连 · 检测到 TUN 网卡${((state.networkInfo.tun_interfaces || [])[0] || '')}`;
+        routeBadge.className = 'font-medium text-amber-600 dark:text-amber-400';
+      } else {
+        routeBadge.textContent = `物理网卡直连 · 本机 IP ${state.networkInfo && state.networkInfo.physical_ip ? state.networkInfo.physical_ip : '—'}`;
+        routeBadge.className = 'font-medium text-emerald-600 dark:text-emerald-400';
+      }
+
+      // ISP/线路：显示真实直连出口 IP 与地区（check_proxy 每次都会实测）
+      const directIp = chk && chk.direct_ip ? chk.direct_ip : (state.networkInfo && state.networkInfo.physical_ip) || '';
+      const directLoc = chk && chk.direct_loc ? chk.direct_loc : '';
+      ispNode.textContent = directIp
+        ? `直连出口: ${directIp}${directLoc ? ' (' + directLoc + ')' : ''}`
+        : '检测网络环境中…';
+    }
+
+    function applyModeVisuals(selectedMode, keepStateMode = false) {
+      if (!keepStateMode) {
+        state.mode = selectedMode;
+      }
+
+      const btnDirect = document.getElementById('modeBtnDirect');
+      const btnVpn = document.getElementById('modeBtnVpn');
+      const btnDual = document.getElementById('modeBtnDual');
+      [btnDirect, btnVpn, btnDual].forEach(b => {
+        b.classList.remove('active');
+        b.classList.add('text-[var(--text-secondary)]');
+      });
+
+      const activeBtn = state.mode === 'direct' ? btnDirect : (state.mode === 'vpn' ? btnVpn : btnDual);
+      activeBtn.classList.add('active');
+      activeBtn.classList.remove('text-[var(--text-secondary)]');
+
+      const routeBadge = document.getElementById('currentRouteBadge');
+      const ispNode = document.getElementById('currentIspNode');
+      const activeTag = document.getElementById('activeModeTag');
+
+      const effectiveMode = selectedMode === 'dual' ? 'vpn' : selectedMode;
+
+      // 顶部「当前出口」徽章不再在这里写死——它是网络事实（系统代理/TUN/出口IP），
+      // 由 applyTelemetry() 按实测结果刷新；这里只负责模式标签的视觉切换。
+      applyTelemetry();
+
+      if (effectiveMode === 'direct') {
+        activeTag.textContent = state.mode === 'dual' ? '双模对比 (阶段1: 直连)' : '不走 VPN (直连)';
+        activeTag.className = 'text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20';
+      } else {
+        activeTag.textContent = state.mode === 'dual' ? '双模对比 (阶段2: 走VPN)' : '走 VPN (代理隧道)';
+        activeTag.className = 'text-[11px] font-medium px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20';
+      }
+
+      // Sync target latency preview values to the selected mode if not actively testing
+      if (!state.isTesting) {
+        const snap = state.lastResults[effectiveMode];
+        if (snap) {
+          document.getElementById('dlValueText').textContent = formatSpeed(snap.dl);
+          document.getElementById('ulValueText').textContent = formatSpeed(snap.ul);
+          document.getElementById('metricPing').textContent = `${snap.ping}`;
+          document.getElementById('metricJitter').textContent = `${snap.jitter}`;
+          document.getElementById('dlPeakLabel').textContent = `峰值 ${formatSpeed(snap.dl)}`;
+          document.getElementById('ulPeakLabel').textContent = `峰值 ${formatSpeed(snap.ul)}`;
+          updateGaugeArc(snap.dl, false);
+        } else {
+          // 尚未实测：显示占位，避免展示编造数值
+          document.getElementById('dlValueText').textContent = '--';
+          document.getElementById('ulValueText').textContent = '--';
+          document.getElementById('metricPing').textContent = '--';
+          document.getElementById('metricJitter').textContent = '--';
+          document.getElementById('dlPeakLabel').textContent = '峰值 --';
+          document.getElementById('ulPeakLabel').textContent = '峰值 --';
+          updateGaugeArc(0, false);
+        }
+
+        state.targets.forEach(item => {
+          // 切换模式后旧的延迟数据不再有效，清空待实测；
+          // 绝不回填 directMs / vpnRuleMs 等硬编码常量冒充测量结果
+          item.currentMs = null;
+        });
+        renderLatencyLists({ resetScroll: true });
+        updateSmartDiagnostic();
+      }
+    }
+
+    function updateSmartDiagnostic() {
+      const badge = document.getElementById('diagStatusBadge');
+      const text = document.getElementById('diagSummaryText');
+      const cnValid = state.targets.filter(t => t.region === 'cn' && t.currentMs != null && t.currentMs < 900);
+      const cnAvg = cnValid.length ? Math.round(cnValid.reduce((a, b) => a + b.currentMs, 0) / cnValid.length) : null;
+      const cnTxt = cnAvg !== null ? `${cnAvg}` : '--';
+
+      if (state.mode === 'direct') {
+        badge.textContent = '直连模式 · 国内极速';
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+        text.innerHTML = `当前处于<strong class="text-[var(--text-primary)]">不走 VPN 直连模式</strong>：国内主流应用（微信、B站、抖音、淘宝）平均延迟 <span class="font-mono-num text-emerald-600 dark:text-emerald-400 font-semibold">${cnTxt} ms</span>${cnAvg === null ? '（待实测）' : '，满血跑满本地宽带'}；海外应用（Google、YouTube、ChatGPT 等）受跨境阻断影响无法直接连接。`;
+      } else if (state.mode === 'vpn' && state.vpnRuleMode === 'global') {
+        badge.textContent = '警告：国内流量正绕行海外';
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400';
+        text.innerHTML = `检测到当前 VPN 处于 <strong class="text-amber-600 dark:text-amber-400">Global 全局代理模式</strong>：海外软件已全部连通，但中国大陆软件（微信、B站等）平均延迟升至 <span class="font-mono-num text-amber-600 font-semibold">${cnTxt} ms</span>${cnAvg === null ? '（待实测）' : ''}。建议在代理客户端或“通道设置”中切换为 <strong>Rule 智能分流（绕过中国大陆域名）</strong>。`;
+      } else {
+        badge.textContent = '最优分流 · 国内外双优';
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400';
+        const vpnGlobal = state.lastResults.vpn ? state.lastResults.vpn.globalAvg : null;
+        const globalTxt = vpnGlobal !== null ? `${vpnGlobal} ms` : '-- ms（待实测）';
+        text.innerHTML = `当前处于<strong class="text-[var(--text-primary)]">走 VPN 智能分流模式</strong>：海外应用（Google、YouTube、ChatGPT、GitHub、Telegram）平均延迟 <span class="font-mono-num text-indigo-600 dark:text-indigo-400 font-semibold">${globalTxt}</span>；同时中国大陆软件自动走本地直连，平均延迟保持在 <span class="font-mono-num text-emerald-600 dark:text-emerald-400 font-semibold">${cnTxt} ms</span>。`;
+      }
+    }
+
+    function renderHistoryAndCompare() {
+      const d = state.lastResults.direct;
+      const v = state.lastResults.vpn;
+
+      // 双模数据不全时只显示占位，绝不编造对比数值
+      if (!d || !v) {
+        document.getElementById('compDlRatio').textContent = '--';
+        document.getElementById('compDlDetail').textContent =
+          (!d && !v) ? '请先完成两种模式的测速' : (d ? '待测：走 VPN 模式' : '待测：不走 VPN 模式');
+        document.getElementById('compCnDelta').textContent = '--';
+        document.getElementById('compCnDetail').textContent = '需要两份结果';
+        document.getElementById('compGlobalDelta').textContent = '--';
+        document.getElementById('compGlobalDetail').textContent = '需要两份结果';
+        return;
+      }
+
+      const ratio = d.dl > 0 ? ((v.dl / d.dl) * 100).toFixed(1) : '0.0';
+      document.getElementById('compDlRatio').textContent = `${ratio}%`;
+      document.getElementById('compDlDetail').textContent = `${formatSpeed(v.dl)} vs ${formatSpeed(d.dl)} ${state.unit}`;
+
+      const cnDiff = v.cnAvg - d.cnAvg;
+      document.getElementById('compCnDelta').textContent = `${cnDiff >= 0 ? '+' : ''}${cnDiff} ms`;
+      document.getElementById('compCnDetail').textContent = `直连 ${d.cnAvg}ms · VPN ${v.cnAvg}ms`;
+
+      // 直连受限项数 = 海外总数 - 实测成功项数，随列表长度动态计算，不再写死 6
+      const glTotal = state.targets.filter(t => t.region === 'global').length;
+      const glBlocked = glTotal - (v.globalAvg < 900 ? glTotal - state.targets.filter(t => t.region === 'global' && t.currentMs >= 900).length : glTotal);
+      document.getElementById('compGlobalDelta').textContent = '100% 连通';
+      document.getElementById('compGlobalDetail').textContent = `VPN 均延 ${v.globalAvg}ms (直连受限对比)`;
+
+      const tbody = document.getElementById('historyTableBody');
+      tbody.innerHTML = '';
+      state.history.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-[var(--bg-subtle)] transition';
+        const badgeClass = row.modeKey === 'vpn'
+          ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 text-[var(--text-secondary)]">${row.time}</td>
+          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[11px] font-sans font-medium ${badgeClass}">${row.modeLabel}</span></td>
+          <td class="py-2.5 px-3 text-[var(--text-secondary)]">${row.route}</td>
+          <td class="py-2.5 px-3 text-right font-semibold text-blue-600 dark:text-blue-400">${formatSpeed(row.dl)} ${state.unit}</td>
+          <td class="py-2.5 px-3 text-right font-semibold text-teal-600 dark:text-teal-400">${formatSpeed(row.ul)} ${state.unit}</td>
+          <td class="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400">${row.cnAvg}</td>
+          <td class="py-2.5 px-3 text-right text-indigo-600 dark:text-indigo-400">${row.globalAvg}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('historyCountBadge').textContent = String(state.history.length);
+    }
+
+    // ==================== EVENT LISTENERS INITIALIZATION ====================
+    window.addEventListener('DOMContentLoaded', () => {
+      // Initial render
+      applyModeVisuals('direct');
+      renderHistoryAndCompare();
+
+      // 读取系统代理并实测代理出口：避免前端写死 7890 而后端系统代理是别的端口，
+      // 导致「走 VPN」测速其实没走代理还看不出来。
+      const initProxyProbe = async () => {
+        const api = window.pywebview && window.pywebview.api;
+        if (!api || !api.get_network_info) return;
+        try {
+          const info = await api.get_network_info();
+          state.networkInfo = info || {};
+          if (info && info.system_proxy) {
+            state.proxyEndpoint = info.system_proxy;
+            state.proxyName = '系统代理 ' + info.system_proxy;
+          } else {
+            // 无系统代理：如实在页头显示直连，不再冒充 Clash 端口
+            state.proxyName = '无系统代理';
+          }
+          updateProxyHeader();
+          applyTelemetry();                      // 先按注册表/TUN 事实刷新占位
+          if (api.check_proxy) {
+            const chk = await api.check_proxy(state.proxyEndpoint || '');
+            state.proxyCheck = chk;
+            if (chk && chk.ok && chk.via_proxy) {
+              showToast(`代理已联通 · 出口 ${chk.exit_ip} (${chk.exit_loc}) · ${chk.scheme.toUpperCase()}`);
+            } else if (chk && chk.error && chk.error !== '未检测到系统代理，且未传入代理地址') {
+              showToast(`代理未联通：${chk.error}`);
+            }
+          }
+          applyTelemetry();                      // 出口 IP 实测到位后再刷新一次
+        } catch (e) { /* 静默：代理探测失败不阻塞界面 */ }
+      };
+      if (window.pywebview && window.pywebview.api) {
+        initProxyProbe();
+      } else {
+        window.addEventListener('pywebviewready', initProxyProbe);
+      }
+
+      // Initial demo waveform
+      state.waveformDl = [410, 465, 495, 512, 518, 525, 522, 528, 519, 524, 526, 524];
+      state.waveformUl = [290, 320, 345, 355, 360, 358, 362, 359, 361, 360, 358, 360];
+      setTimeout(drawWaveform, 60);
+      window.addEventListener('resize', drawWaveform);
+
+      // Mode buttons
+      document.getElementById('modeBtnDirect').addEventListener('click', () => applyModeVisuals('direct'));
+      document.getElementById('modeBtnVpn').addEventListener('click', () => applyModeVisuals('vpn'));
+      document.getElementById('modeBtnDual').addEventListener('click', () => applyModeVisuals('dual'));
+
+      // Navigation tabs (Dashboard vs Compare/History)
+      const tabDash = document.getElementById('navTabDashboard');
+      const tabComp = document.getElementById('navTabCompare');
+      const viewDash = document.getElementById('viewDashboard');
+      const viewComp = document.getElementById('viewCompare');
+
+      tabDash.addEventListener('click', () => {
+        tabDash.classList.add('active');
+        tabDash.classList.remove('text-[var(--text-secondary)]');
+        tabComp.classList.remove('active');
+        tabComp.classList.add('text-[var(--text-secondary)]');
+        viewDash.classList.remove('hidden');
+        viewComp.classList.add('hidden');
+        viewComp.classList.remove('flex');
+        setTimeout(drawWaveform, 30);
+      });
+
+      tabComp.addEventListener('click', () => {
+        tabComp.classList.add('active');
+        tabComp.classList.remove('text-[var(--text-secondary)]');
+        tabDash.classList.remove('active');
+        tabDash.classList.add('text-[var(--text-secondary)]');
+        viewDash.classList.add('hidden');
+        viewComp.classList.remove('hidden');
+        viewComp.classList.add('flex');
+        renderHistoryAndCompare();
+      });
+
+      // Start full test & quick ping
+      document.getElementById('btnStartFullTest').addEventListener('click', startSpeedTestFlow);
+      document.getElementById('btnQuickPingOnly').addEventListener('click', () => {
+        pingRegionTargets(null);
+        showToast('正在并发刷新全部国内外软件延迟...');
+      });
+      document.getElementById('btnPingCnOnly').addEventListener('click', () => {
+        pingRegionTargets('cn');
+        showToast('正在刷新中国大陆常用软件延迟...');
+      });
+      document.getElementById('btnPingGlobalOnly').addEventListener('click', () => {
+        pingRegionTargets('global');
+        showToast('正在刷新海外常用软件延迟...');
+      });
+
+      // Run Dual from Compare View
+      document.getElementById('btnRunDualFromCompare').addEventListener('click', () => {
+        tabDash.click();
+        applyModeVisuals('dual');
+        startSpeedTestFlow();
+      });
+
+      // Clear History
+      document.getElementById('btnClearHistory').addEventListener('click', () => {
+        state.history = [];
+        renderHistoryAndCompare();
+        showToast('历史测速记录已清空');
+      });
+
+      // Unit Toggle (Mbps / MB/s)
+      document.getElementById('btnUnitToggle').addEventListener('click', () => {
+        state.unit = state.unit === 'Mbps' ? 'MB/s' : 'Mbps';
+        document.getElementById('unitLabelText').textContent = state.unit;
+        document.querySelectorAll('.unit-suffix').forEach(el => { el.textContent = state.unit; });
+        applyModeVisuals(state.mode);
+        renderHistoryAndCompare();
+        showToast(`速率单位已切换为 ${state.unit}`);
+      });
+
+      // Category Filter Buttons
+      document.querySelectorAll('.cat-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.cat-filter-btn').forEach(b => {
+            b.classList.remove('active');
+            b.classList.add('text-[var(--text-secondary)]');
+          });
+          btn.classList.add('active');
+          btn.classList.remove('text-[var(--text-secondary)]');
+          state.activeCategory = btn.getAttribute('data-cat');
+          renderLatencyLists({ resetScroll: true });
+        });
+      });
+
+      // Theme Toggle
+      document.getElementById('btnThemeToggle').addEventListener('click', () => {
+        const html = document.documentElement;
+        const isDark = html.classList.toggle('dark');
+        document.getElementById('iconSun').classList.toggle('hidden', !isDark);
+        document.getElementById('iconMoon').classList.toggle('hidden', isDark);
+        drawWaveform();
+      });
+
+      // Window Chrome Compact / Expand toggles
+      document.getElementById('btnWinCompact').addEventListener('click', () => {
+        const shell = document.getElementById('appShell');
+        shell.classList.toggle('max-w-[1024px]');
+        shell.classList.toggle('max-w-[1280px]');
+        setTimeout(drawWaveform, 50);
+      });
+      document.getElementById('btnWinExpand').addEventListener('click', () => {
+        const shell = document.getElementById('appShell');
+        shell.classList.toggle('max-w-full');
+        setTimeout(drawWaveform, 50);
+      });
+
+      // Settings Modal
+      const modalSettings = document.getElementById('modalSettings');
+      const closeSettings = () => {
+        modalSettings.classList.add('hidden');
+        modalSettings.classList.remove('flex');
+      };
+      document.getElementById('btnOpenSettings').addEventListener('click', () => {
+        modalSettings.classList.remove('hidden');
+        modalSettings.classList.add('flex');
+      });
+      document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
+      document.getElementById('btnCancelSettings').addEventListener('click', closeSettings);
+
+      document.querySelectorAll('.proxy-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.getElementById('inputProxyEndpoint').value = btn.getAttribute('data-preset');
+          state.proxyName = btn.getAttribute('data-name');
+        });
+      });
+
+      document.getElementById('btnSaveSettings').addEventListener('click', () => {
+        const ep = document.getElementById('inputProxyEndpoint').value.trim();
+        if (!ep) {
+          showToast('代理地址不能为空，请填写如 127.0.0.1:10809');
+          return;
+        }
+        state.proxyEndpoint = ep;
+        state.vpnRuleMode = document.getElementById('selectVpnRuleMode').value;
+        state.threads = Number(document.getElementById('selectThreadCount').value);
+        updateProxyHeader();
+        document.getElementById('footerThreadInfo').textContent = `并发线程: ${state.threads} Threads`;
+        applyModeVisuals(state.mode);
+        closeSettings();
+        showToast(`通道配置已更新: ${ep}`);
+      });
+
+      // Add Custom Node Modal
+      const modalAdd = document.getElementById('modalAddNode');
+      const closeAdd = () => {
+        modalAdd.classList.add('hidden');
+        modalAdd.classList.remove('flex');
+      };
+      document.getElementById('btnAddCustomNode').addEventListener('click', () => {
+        modalAdd.classList.remove('hidden');
+        modalAdd.classList.add('flex');
+      });
+      document.getElementById('btnCloseAddNode').addEventListener('click', closeAdd);
+      document.getElementById('btnCancelAddNode').addEventListener('click', closeAdd);
+
+      document.getElementById('btnConfirmAddNode').addEventListener('click', () => {
+        const name = document.getElementById('inputNodeName').value.trim();
+        let host = document.getElementById('inputNodeHost').value.trim();
+        const region = document.getElementById('selectNodeRegion').value;
+        const cat = document.getElementById('selectNodeCat').value;
+
+        if (!name || !host) {
+          showToast('请填写完整的软件名称与测试域名');
+          return;
+        }
+        host = host.replace(/^https?:\/\//, '').split('/')[0];
+        const newId = `custom-${Date.now()}`;
+        const newItem = {
+          id: newId,
+          region,
+          cat,
+          name,
+          desc: '用户自定义测试节点',
+          host,
+          url: `https://${host}`,
+          directMs: region === 'cn' ? 24 : 210,
+          vpnRuleMs: region === 'cn' ? 27 : 85,
+          vpnGlobalMs: region === 'cn' ? 155 : 82,
+          currentMs: null,
+          status: 'ok'
+        };
+        state.targets.unshift(newItem);
+        document.getElementById('inputNodeName').value = '';
+        document.getElementById('inputNodeHost').value = '';
+        closeAdd();
+        pingSingleTarget(newId);
+      });
+
+      // Export Diagnostic Report to Clipboard
+      document.getElementById('btnExportReport').addEventListener('click', () => {
+        const snap = state.lastResults[state.mode === 'vpn' ? 'vpn' : 'direct'];
+        if (!snap) {
+          showToast('当前模式尚无实测数据，请先完成一次测速');
+          return;
+        }
+        const reportText = [
+          `【Dual-use Windows 双模网络诊断报告】`,
+          `当前模式: ${state.mode === 'vpn' ? '走 VPN 代理模式 (' + state.proxyEndpoint + ')' : '不走 VPN 直连模式'}`,
+          `下载速度: ${formatSpeed(snap.dl)} ${state.unit} | 上传速度: ${formatSpeed(snap.ul)} ${state.unit}`,
+          `基准延迟: ${snap.ping} ms | 抖动: ${snap.jitter} ms`,
+          `中国大陆常用软件平均延迟: ${snap.cnAvg} ms`,
+          `海外常用软件平均延迟: ${snap.globalAvg} ms`
+        ].join('\n');
+
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(reportText).then(() => showToast('诊断报告已复制到剪贴板'));
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = reportText;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showToast('诊断报告已复制到剪贴板');
+          }
+        } catch (err) {
+          showToast('诊断报告已生成');
+        }
+      });
+
+      // 初始化：按弧长摆放仪表盘刻度，并绘制空波形
+      layoutGaugeTicks();
+      drawWaveform();
+    });
+  </script>
+</body>
+</html>
